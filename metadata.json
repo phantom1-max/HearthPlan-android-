@@ -1,0 +1,6 @@
+{
+  "name": "Hearthplan",
+  "description": "Architectural floor planning and interior design app for drafting rooms, arranging furniture, and exporting PDF plans.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
