@@ -69,16 +69,16 @@ fun BlankProjectDialog(
     var isAnalyzingImage by remember { mutableStateOf(false) }
     var aiAnalysisNote by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
 
-    // Camera launcher
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap: Bitmap? ->
-        if (bitmap != null) {
-            selectedImageBitmap = bitmap
-            isAnalyzingImage = true
-            aiAnalysisNote = null
-            scope.launch {
+    fun processCapturedImage(bitmap: Bitmap?) {
+        if (bitmap == null) return
+        selectedImageBitmap = bitmap
+        isAnalyzingImage = true
+        aiAnalysisNote = null
+        errorMessage = null
+        scope.launch {
+            try {
                 val result = PlotVisionAnalyzer.analyzePlotImage(bitmap, unit)
                 width1Input = String.format(java.util.Locale.US, "%.1f", result.width1)
                 width2Input = String.format(java.util.Locale.US, "%.1f", result.width2)
@@ -89,8 +89,78 @@ fun BlankProjectDialog(
                 }
                 floorCountInput = result.recommendedFloors.toString()
                 aiAnalysisNote = result.notes
+            } catch (e: Exception) {
+                errorMessage = "Scan analysis error: ${e.message}"
+            } finally {
                 isAnalyzingImage = false
             }
+        }
+    }
+
+    // High-resolution File-based Camera Launcher
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        val uri = tempCameraUri
+        if (success && uri != null) {
+            try {
+                val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, _, _ ->
+                        decoder.isMutableRequired = true
+                    }
+                } else {
+                    @Suppress("DEPRECATION")
+                    MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+                }
+                processCapturedImage(bitmap)
+            } catch (e: Exception) {
+                errorMessage = "Could not decode captured photo: ${e.message}"
+            }
+        }
+    }
+
+    // Camera runtime permission launcher
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            try {
+                val tempFile = java.io.File(context.cacheDir, "scan_plot_${System.currentTimeMillis()}.jpg")
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    tempFile
+                )
+                tempCameraUri = uri
+                takePictureLauncher.launch(uri)
+            } catch (e: Exception) {
+                errorMessage = "Storage error launching camera: ${e.message}"
+            }
+        } else {
+            errorMessage = "Camera permission is required to capture photos of plot plans."
+        }
+    }
+
+    fun startCamera() {
+        val permissionCheck = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.CAMERA
+        )
+        if (permissionCheck == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            try {
+                val tempFile = java.io.File(context.cacheDir, "scan_plot_${System.currentTimeMillis()}.jpg")
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    tempFile
+                )
+                tempCameraUri = uri
+                takePictureLauncher.launch(uri)
+            } catch (e: Exception) {
+                errorMessage = "Could not launch camera: ${e.message}"
+            }
+        } else {
+            cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
         }
     }
 
@@ -108,25 +178,7 @@ fun BlankProjectDialog(
                     @Suppress("DEPRECATION")
                     MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
                 }
-
-                if (bitmap != null) {
-                    selectedImageBitmap = bitmap
-                    isAnalyzingImage = true
-                    aiAnalysisNote = null
-                    scope.launch {
-                        val result = PlotVisionAnalyzer.analyzePlotImage(bitmap, unit)
-                        width1Input = String.format(java.util.Locale.US, "%.1f", result.width1)
-                        width2Input = String.format(java.util.Locale.US, "%.1f", result.width2)
-                        length1Input = String.format(java.util.Locale.US, "%.1f", result.length1)
-                        length2Input = String.format(java.util.Locale.US, "%.1f", result.length2)
-                        if (result.width1 != result.width2 || result.length1 != result.length2) {
-                            isIrregularPlot = true
-                        }
-                        floorCountInput = result.recommendedFloors.toString()
-                        aiAnalysisNote = result.notes
-                        isAnalyzingImage = false
-                    }
-                }
+                processCapturedImage(bitmap)
             } catch (e: Exception) {
                 errorMessage = "Could not load image: ${e.message}"
             }
@@ -214,7 +266,7 @@ fun BlankProjectDialog(
                         }
 
                         Text(
-                            "Take a photo or upload a sketch of your plot / floor plan. AI will extract boundary dimensions and floor count.",
+                            "Take a photo or upload a sketch of your plot or blueprint. The AI scanner reads written measurements (handwritten or printed, e.g. 19m, 25 ft) and automatically maps them to your boundary inputs.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -224,7 +276,7 @@ fun BlankProjectDialog(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             OutlinedButton(
-                                onClick = { cameraLauncher.launch(null) },
+                                onClick = { startCamera() },
                                 modifier = Modifier.weight(1f).testTag("capture_photo_button")
                             ) {
                                 Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -242,6 +294,40 @@ fun BlankProjectDialog(
                                 Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("From Gallery", maxLines = 1)
+                            }
+                        }
+
+                        // Instant Sample Blueprint for Testing
+                        OutlinedButton(
+                            onClick = {
+                                processCapturedImage(PlotVisionAnalyzer.createSampleSketchBitmap())
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("try_sample_sketch_button"),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Default.Architecture, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Try Sample Sketch (19m × 25m Irregular)", maxLines = 1)
+                        }
+
+                        if (errorMessage != null) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        errorMessage!!,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
                             }
                         }
 

@@ -33,11 +33,15 @@ class HearthplanViewModel(
 
     val activeFloor: StateFlow<Floor?> = combine(_currentProject, _activeFloorIndex) { project, index ->
         project?.floors?.getOrNull(index) ?: project?.floors?.firstOrNull()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val lowerFloor: StateFlow<Floor?> = combine(_currentProject, _activeFloorIndex) { project, index ->
         if (project != null && index > 0) project.floors.getOrNull(index - 1) else null
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private fun getActiveFloor(proj: Project): Floor? {
+        return proj.floors.getOrNull(_activeFloorIndex.value) ?: proj.floors.firstOrNull()
+    }
 
     private val _selectedElement = MutableStateFlow<SelectedElement?>(null)
     val selectedElement: StateFlow<SelectedElement?> = _selectedElement.asStateFlow()
@@ -74,6 +78,11 @@ class HearthplanViewModel(
         viewModelScope.launch {
             repository.initializeBuiltinTemplatesIfEmpty()
         }
+    }
+
+    fun recordUndoSnapshot() {
+        val proj = _currentProject.value ?: return
+        pushUndoState(proj)
     }
 
     private fun pushUndoState(project: Project) {
@@ -309,7 +318,7 @@ class HearthplanViewModel(
         breadth: Float? = null
     ) {
         val proj = _currentProject.value ?: return
-        val curFloor = activeFloor.value ?: return
+        val curFloor = getActiveFloor(proj) ?: return
         pushUndoState(proj)
 
         val rLength = length ?: roomType.defaultLengthMeters
@@ -343,7 +352,7 @@ class HearthplanViewModel(
 
     fun updateRoom(updatedRoom: RoomItem) {
         val proj = _currentProject.value ?: return
-        val curFloor = activeFloor.value ?: return
+        val curFloor = getActiveFloor(proj) ?: return
 
         val updatedRooms = curFloor.rooms.map { if (it.id == updatedRoom.id) updatedRoom else it }
         val updatedFloor = curFloor.copy(rooms = updatedRooms)
@@ -356,7 +365,7 @@ class HearthplanViewModel(
 
     fun setRoomDimensions(roomId: String, length: Float, breadth: Float) {
         val proj = _currentProject.value ?: return
-        val curFloor = activeFloor.value ?: return
+        val curFloor = getActiveFloor(proj) ?: return
         val room = curFloor.rooms.find { it.id == roomId } ?: return
         pushUndoState(proj)
 
@@ -369,7 +378,7 @@ class HearthplanViewModel(
 
     fun addDoorToRoom(roomId: String, wall: WallEdge, width: Float) {
         val proj = _currentProject.value ?: return
-        val curFloor = activeFloor.value ?: return
+        val curFloor = getActiveFloor(proj) ?: return
         val room = curFloor.rooms.find { it.id == roomId } ?: return
         pushUndoState(proj)
 
@@ -379,7 +388,7 @@ class HearthplanViewModel(
 
     fun addWindowToRoom(roomId: String, wall: WallEdge, width: Float) {
         val proj = _currentProject.value ?: return
-        val curFloor = activeFloor.value ?: return
+        val curFloor = getActiveFloor(proj) ?: return
         val room = curFloor.rooms.find { it.id == roomId } ?: return
         pushUndoState(proj)
 
@@ -399,7 +408,7 @@ class HearthplanViewModel(
         desc: String? = null
     ) {
         val proj = _currentProject.value ?: return
-        val curFloor = activeFloor.value ?: return
+        val curFloor = getActiveFloor(proj) ?: return
         pushUndoState(proj)
 
         // Try placing near selected room or floor center
@@ -432,9 +441,47 @@ class HearthplanViewModel(
         scheduleAutoSave(updatedProj)
     }
 
+    fun addFurnitureAt(
+        templateId: String,
+        name: String,
+        category: FurnitureCategory,
+        length: Float,
+        breadth: Float,
+        worldX: Float,
+        worldY: Float,
+        isCustom: Boolean = false,
+        desc: String? = null
+    ) {
+        val proj = _currentProject.value ?: return
+        val curFloor = getActiveFloor(proj) ?: return
+        pushUndoState(proj)
+
+        val newItem = FurnitureItem(
+            id = UUID.randomUUID().toString(),
+            templateId = templateId,
+            name = name,
+            category = category,
+            x = worldX.coerceAtLeast(0.1f),
+            y = worldY.coerceAtLeast(0.1f),
+            length = length,
+            breadth = breadth,
+            rotationDegrees = 0f,
+            isCustom = isCustom,
+            customDescription = desc
+        )
+
+        val updatedFloor = curFloor.copy(furniture = curFloor.furniture + newItem)
+        val updatedFloors = proj.floors.map { if (it.id == curFloor.id) updatedFloor else it }
+        val updatedProj = proj.copy(floors = updatedFloors, updatedAt = System.currentTimeMillis())
+
+        _currentProject.value = updatedProj
+        _selectedElement.value = SelectedElement.Furniture(newItem.id)
+        scheduleAutoSave(updatedProj)
+    }
+
     fun updateFurniture(updatedItem: FurnitureItem) {
         val proj = _currentProject.value ?: return
-        val curFloor = activeFloor.value ?: return
+        val curFloor = getActiveFloor(proj) ?: return
 
         val updatedFurn = curFloor.furniture.map { if (it.id == updatedItem.id) updatedItem else it }
         val updatedFloor = curFloor.copy(furniture = updatedFurn)
@@ -454,7 +501,7 @@ class HearthplanViewModel(
     fun deleteSelectedElement() {
         val sel = _selectedElement.value ?: return
         val proj = _currentProject.value ?: return
-        val curFloor = activeFloor.value ?: return
+        val curFloor = getActiveFloor(proj) ?: return
         pushUndoState(proj)
 
         val updatedFloor = when (sel) {
@@ -473,7 +520,7 @@ class HearthplanViewModel(
     fun duplicateSelectedElement() {
         val sel = _selectedElement.value ?: return
         val proj = _currentProject.value ?: return
-        val curFloor = activeFloor.value ?: return
+        val curFloor = getActiveFloor(proj) ?: return
         pushUndoState(proj)
 
         when (sel) {

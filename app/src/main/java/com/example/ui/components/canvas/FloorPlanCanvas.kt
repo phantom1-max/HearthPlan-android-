@@ -49,6 +49,8 @@ fun FloorPlanCanvas(
     zoomScale: Float,
     panOffset: Offset,
     onTransform: (zoomChange: Float, panChange: Offset) -> Unit,
+    onStartModifying: () -> Unit = {},
+    onCoordinateConverterReady: (((Offset) -> Offset) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     // Current dragging handle
@@ -100,6 +102,12 @@ fun FloorPlanCanvas(
         if (!snapToGrid) return value
         val step = if (project.unit == MeasurementUnit.FEET) 0.1524f else 0.1f // ~6 inches or 10cm
         return (round(value / step) * step)
+    }
+
+    LaunchedEffect(canvasSize, zoomScale, panOffset, project.plotLength, project.plotBreadth) {
+        onCoordinateConverterReady?.invoke { screenPos ->
+            screenToWorld(screenPos)
+        }
     }
 
     // Helper to find handle at screen position
@@ -182,9 +190,11 @@ fun FloorPlanCanvas(
                                         if (handle != ResizeHandle.NONE) {
                                             activeHandle = handle
                                             initialElementBounds = Pair(Offset(room.x, room.y), Size(room.length, room.breadth))
+                                            onStartModifying()
                                         } else if (room.containsPoint(worldStart.x, worldStart.y)) {
                                             isMovingElement = true
                                             initialElementBounds = Pair(Offset(room.x, room.y), Size(room.length, room.breadth))
+                                            onStartModifying()
                                         }
                                     }
                                 }
@@ -196,15 +206,33 @@ fun FloorPlanCanvas(
                                             activeHandle = handle
                                             initialElementBounds = Pair(Offset(furn.x, furn.y), Size(furn.length, furn.breadth))
                                             initialRotation = furn.rotationDegrees
+                                            onStartModifying()
                                         } else if (furn.containsPoint(worldStart.x, worldStart.y)) {
                                             isMovingElement = true
                                             initialElementBounds = Pair(Offset(furn.x, furn.y), Size(furn.length, furn.breadth))
+                                            onStartModifying()
                                         }
                                     }
                                 }
                                 null -> {
-                                    activeHandle = ResizeHandle.NONE
-                                    isMovingElement = false
+                                    val hitFurn = activeFloor.furniture.findLast { it.containsPoint(worldStart.x, worldStart.y) }
+                                    if (hitFurn != null) {
+                                        onSelectElement(SelectedElement.Furniture(hitFurn.id))
+                                        isMovingElement = true
+                                        initialElementBounds = Pair(Offset(hitFurn.x, hitFurn.y), Size(hitFurn.length, hitFurn.breadth))
+                                        onStartModifying()
+                                    } else {
+                                        val hitRoom = activeFloor.rooms.findLast { it.containsPoint(worldStart.x, worldStart.y) }
+                                        if (hitRoom != null) {
+                                            onSelectElement(SelectedElement.Room(hitRoom.id))
+                                            isMovingElement = true
+                                            initialElementBounds = Pair(Offset(hitRoom.x, hitRoom.y), Size(hitRoom.length, hitRoom.breadth))
+                                            onStartModifying()
+                                        } else {
+                                            activeHandle = ResizeHandle.NONE
+                                            isMovingElement = false
+                                        }
+                                    }
                                 }
                             }
                         },

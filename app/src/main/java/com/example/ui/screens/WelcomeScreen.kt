@@ -38,7 +38,6 @@ fun WelcomeScreen(
     onExportProjectPdf: (Project) -> Unit
 ) {
     val context = LocalContext.current
-    val webUrl = "https://hearthplan-f0cywo.v2.appdeploy.ai/"
 
     // File picker for JSON / .hearthplan import
     val importLauncher = rememberLauncherForActivityResult(
@@ -95,53 +94,6 @@ fun WelcomeScreen(
                     }
                 }
             )
-        },
-        bottomBar = {
-            // Accessible, clearly labeled website link at the very bottom
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl))
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Could not open browser: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                    .testTag("website_link_footer"),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                tonalElevation = 2.dp
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        Icons.Default.Language,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Live Web Version: hearthplan-f0cywo.v2.appdeploy.ai",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        Icons.Default.OpenInNew,
-                        contentDescription = "Open in browser",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
         }
     ) { innerPadding ->
         LazyColumn(
@@ -382,46 +334,6 @@ fun WelcomeScreen(
             }
 
             item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp)
-                        .clickable {
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(webUrl))
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Could not open browser: ${e.message}", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                        .testTag("scrollable_website_link_card"),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Language,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Live Web Version: https://hearthplan-f0cywo.v2.appdeploy.ai/",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }

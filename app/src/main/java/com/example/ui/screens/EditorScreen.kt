@@ -16,14 +16,22 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import kotlin.math.round
 import com.example.model.*
 import com.example.ui.HearthplanViewModel
+import com.example.ui.components.FurnitureLibrarySideDrawer
+import com.example.ui.components.FurniturePreviewCanvas
 import com.example.ui.components.canvas.FloorPlanCanvas
 import com.example.ui.components.canvas.SelectedElement
 import com.example.ui.components.dialogs.*
@@ -49,7 +57,13 @@ fun EditorScreen(
     val showLowerOverlay by viewModel.showLowerFloorOverlay.collectAsState()
     val saveStatus by viewModel.saveStatus.collectAsState()
 
-    // Dialog visibility states
+    // Dialog & Drawer visibility states
+    var showFurnitureSideDrawer by remember { mutableStateOf(false) }
+    var draggingTemplate by remember { mutableStateOf<FurnitureTemplate?>(null) }
+    var dragCurrentRootPos by remember { mutableStateOf<Offset?>(null) }
+    var canvasRootPosition by remember { mutableStateOf(Offset.Zero) }
+    var screenToWorldConverter by remember { mutableStateOf<((Offset) -> Offset)?>(null) }
+
     var showAddRoomDialog by remember { mutableStateOf(false) }
     var showFurnitureLibrary by remember { mutableStateOf(false) }
     var showAiFurnitureDialog by remember { mutableStateOf(false) }
@@ -128,6 +142,20 @@ fun EditorScreen(
                             label = { Text(curProj.unit.symbol.uppercase()) },
                             modifier = Modifier.testTag("unit_toggle_button")
                         )
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        // Furniture Library Side Drawer Toggle Button
+                        FilledTonalIconButton(
+                            onClick = { showFurnitureSideDrawer = !showFurnitureSideDrawer },
+                            modifier = Modifier.testTag("furniture_drawer_toggle_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Weekend,
+                                contentDescription = "Furniture Library",
+                                tint = if (showFurnitureSideDrawer) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
 
                         Spacer(modifier = Modifier.width(4.dp))
 
@@ -294,7 +322,7 @@ fun EditorScreen(
                                 leadingIcon = { Icon(Icons.Default.Weekend, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                                 onClick = {
                                     showFabMenu = false
-                                    showFurnitureLibrary = true
+                                    showFurnitureSideDrawer = true
                                 },
                                 modifier = Modifier.testTag("fab_menu_add_furniture")
                             )
@@ -337,7 +365,16 @@ fun EditorScreen(
                     onUpdateFurniture = { viewModel.updateFurniture(it) },
                     zoomScale = zoomScale,
                     panOffset = panOffset,
-                    onTransform = { z, p -> viewModel.transform(z, p) }
+                    onTransform = { z, p -> viewModel.transform(z, p) },
+                    onStartModifying = { viewModel.recordUndoSnapshot() },
+                    onCoordinateConverterReady = { converter ->
+                        screenToWorldConverter = converter
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onGloballyPositioned { coordinates ->
+                            canvasRootPosition = coordinates.positionInRoot()
+                        }
                 )
 
                 // Live Floating Dimension Toolbar when Room is selected
@@ -498,6 +535,128 @@ fun EditorScreen(
                             IconButton(onClick = { viewModel.selectElement(null) }, modifier = Modifier.size(32.dp)) {
                                 Icon(Icons.Default.Close, contentDescription = "Close HUD")
                             }
+                        }
+                    }
+                }
+
+                // Floating Furniture Library Toggle Tab on the right edge
+                if (!showFurnitureSideDrawer) {
+                    Surface(
+                        onClick = { showFurnitureSideDrawer = true },
+                        shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shadowElevation = 6.dp,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .testTag("floating_furniture_tab")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                Icons.Default.Weekend,
+                                contentDescription = "Open Furniture Library",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "LIBRARY",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+
+                // Furniture Library Side-Panel Drawer
+                FurnitureLibrarySideDrawer(
+                    isOpen = showFurnitureSideDrawer,
+                    onClose = { showFurnitureSideDrawer = false },
+                    unit = curProj.unit,
+                    onItemTapped = { template ->
+                        viewModel.addFurniture(
+                            templateId = template.templateId,
+                            name = template.name,
+                            category = template.category,
+                            length = template.defaultLengthMeters,
+                            breadth = template.defaultBreadthMeters
+                        )
+                    },
+                    onDragItemStart = { template, rootPos ->
+                        draggingTemplate = template
+                        dragCurrentRootPos = rootPos
+                    },
+                    onDragItemMove = { rootPos ->
+                        dragCurrentRootPos = rootPos
+                    },
+                    onDragItemEnd = { template, rootPos ->
+                        val converter = screenToWorldConverter
+                        val localCanvasX = rootPos.x - canvasRootPosition.x
+                        val localCanvasY = rootPos.y - canvasRootPosition.y
+
+                        val worldPos = converter?.invoke(Offset(localCanvasX, localCanvasY))
+                            ?: Offset(curFloor.length / 2f, curFloor.breadth / 2f)
+
+                        val finalX = if (snapToGrid) (round(worldPos.x / 0.1f) * 0.1f) else worldPos.x
+                        val finalY = if (snapToGrid) (round(worldPos.y / 0.1f) * 0.1f) else worldPos.y
+
+                        viewModel.addFurnitureAt(
+                            templateId = template.templateId,
+                            name = template.name,
+                            category = template.category,
+                            length = template.defaultLengthMeters,
+                            breadth = template.defaultBreadthMeters,
+                            worldX = finalX.coerceAtLeast(0.1f),
+                            worldY = finalY.coerceAtLeast(0.1f)
+                        )
+                        draggingTemplate = null
+                        dragCurrentRootPos = null
+                    },
+                    onOpenAiCustomDialog = {
+                        showAiFurnitureDialog = true
+                    },
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                )
+
+                // Dragging floating item preview under finger
+                val curDragging = draggingTemplate
+                val curDragPos = dragCurrentRootPos
+                if (curDragging != null && curDragPos != null) {
+                    val localX = (curDragPos.x - canvasRootPosition.x).coerceAtLeast(0f)
+                    val localY = (curDragPos.y - canvasRootPosition.y).coerceAtLeast(0f)
+                    Surface(
+                        modifier = Modifier
+                            .offset {
+                                IntOffset(
+                                    (localX - 35.dp.toPx()).toInt(),
+                                    (localY - 35.dp.toPx()).toInt()
+                                )
+                            }
+                            .size(70.dp)
+                            .shadow(12.dp, RoundedCornerShape(12.dp)),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                        border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(4.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Box(modifier = Modifier.size(38.dp)) {
+                                FurniturePreviewCanvas(template = curDragging, modifier = Modifier.fillMaxSize())
+                            }
+                            Text(
+                                curDragging.name,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }

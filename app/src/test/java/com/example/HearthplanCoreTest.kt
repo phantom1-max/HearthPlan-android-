@@ -161,4 +161,67 @@ class HearthplanCoreTest {
         assertEquals("10000 mm", MeasurementUnit.MILLIMETERS.format(10f))
         assertEquals("10.94 yd", MeasurementUnit.YARDS.format(10f))
     }
+
+    @Test
+    fun testUndoRedoHistory() {
+        val viewModel = com.example.ui.HearthplanViewModel(repository)
+        viewModel.createBlankProject(
+            name = "Undo Test Project",
+            width1 = 20f,
+            width2 = 20f,
+            length1 = 20f,
+            length2 = 20f,
+            unit = MeasurementUnit.METERS,
+            floorCount = 1
+        )
+
+        assertFalse("Cannot undo initially on fresh project", viewModel.canUndo.value)
+        assertFalse("Cannot redo initially", viewModel.canRedo.value)
+
+        // 1. Add Room
+        viewModel.addRoom(RoomType.BEDROOM, "Master Bed", 4.5f, 4.0f)
+        assertTrue("Can undo after adding room", viewModel.canUndo.value)
+        assertEquals(1, viewModel.currentProject.value?.floors?.firstOrNull()?.rooms?.size)
+
+        // 2. Add Furniture
+        viewModel.addFurniture("bed_king", "King Size Bed", FurnitureCategory.BEDS, 2.0f, 2.1f)
+        assertEquals(1, viewModel.currentProject.value?.floors?.firstOrNull()?.furniture?.size)
+
+        // 3. Add Furniture At coordinates (Drag and drop)
+        viewModel.addFurnitureAt("table_dining", "Dining Table", FurnitureCategory.TABLES_DESKS, 1.8f, 0.9f, 6.0f, 5.0f)
+        assertEquals(2, viewModel.currentProject.value?.floors?.firstOrNull()?.furniture?.size)
+
+        // 4. Undo drag and drop
+        viewModel.undo()
+        assertEquals(1, viewModel.currentProject.value?.floors?.firstOrNull()?.furniture?.size)
+        assertTrue("Can redo after undo", viewModel.canRedo.value)
+
+        // 5. Redo drag and drop
+        viewModel.redo()
+        assertEquals(2, viewModel.currentProject.value?.floors?.firstOrNull()?.furniture?.size)
+
+        // 6. Undo both furniture additions
+        viewModel.undo()
+        viewModel.undo()
+        assertEquals(0, viewModel.currentProject.value?.floors?.firstOrNull()?.furniture?.size)
+        assertEquals(1, viewModel.currentProject.value?.floors?.firstOrNull()?.rooms?.size)
+
+        // 7. Undo room addition
+        viewModel.undo()
+        assertEquals(0, viewModel.currentProject.value?.floors?.firstOrNull()?.rooms?.size)
+    }
+
+    @Test
+    fun testPlotVisionAnalyzerSampleSketch() = runBlocking {
+        val sampleBmp = com.example.util.PlotVisionAnalyzer.createSampleSketchBitmap()
+        assertNotNull(sampleBmp)
+        assertEquals(600, sampleBmp.width)
+        assertEquals(600, sampleBmp.height)
+
+        val result = com.example.util.PlotVisionAnalyzer.analyzePlotImage(sampleBmp, MeasurementUnit.METERS)
+        assertNotNull(result)
+        assertTrue("Detected dimensions should be positive", result.width1 > 0f)
+        assertTrue("Detected dimensions should be positive", result.length1 > 0f)
+        assertTrue("Notes should report analysis", result.notes.isNotBlank())
+    }
 }
